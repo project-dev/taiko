@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>お囃子練習用バーチャル太鼓</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background-color: #f0f0f0;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: sans-serif;
+    }
+
+    canvas {
+      touch-action: manipulation;
+      background-color: #ffffff;
+      //border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="taiko" width="300" height="300"></canvas>
+
+  <script>
+    const canvas = document.getElementById('taiko');
+    const ctx = canvas.getContext('2d');
+    let canvasSize = 300;
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let soundDon, soundKa;
+
+	const pan = new Array(
+		[0],
+		[0],
+		[-0.5, 0.5],
+		[-0.5, 0, 0.5],
+		[-1, -0.5, 0.5, 1],
+	);
+
+    const pads = new Map();
+    // タタコンの各ボタン番号に対応（機種によって異なる場合あり）
+    const TARGET_BUTTONS = {
+      don: [2, 3, 1, 14], // 通常「面」 Win 2,3 Android 1,14
+      ka: [4, 5] // 通常「縁」
+    };
+
+    let hitEffect = null;
+
+	const AXIS_SENSITIVITY = 1.5; // このしきい値を超えたら叩いたと判断
+	const AXIS_INDEX = 9;
+
+    async function loadSound(url) {
+      const res = await fetch(url);
+      const buffer = await res.arrayBuffer();
+      return await audioCtx.decodeAudioData(buffer);
+    }
+
+    function playSound(buffer, index) {
+
+	  panValue = pan[pads.size][index];
+	  if(panValue == undefined){
+	    panValue = 0;
+	  }
+
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+
+	  const panner = audioCtx.createStereoPanner();
+	  panner.pan.value = panValue;
+
+      src.connect(panner).connect(audioCtx.destination);
+      src.start(0);
+    }
+
+    function resizeCanvas() {
+      // 画面サイズに応じて canvas のサイズを調整
+      const margin = 20;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      // 横幅と高さの 80% を上限にして、正方形のキャンバスを作る
+
+      const size = Math.min(width, height) - margin * 2;
+      canvasSize = Math.max(100, size);
+
+      canvas.width = canvas.height = canvasSize;
+
+      drawTaiko();
+    }
+
+	function drawTaiko() {
+	  ctx.clearRect(0, 0, canvasSize, canvasSize);
+	  const center = canvasSize / 2;
+	  const innerRadius = canvasSize * 0.27;
+	  const outerRadius = canvasSize * 0.42;
+
+	  let colorDon = '#d94d4d';
+	  let colorKa = '#a52a2a';
+
+	  if (hitEffect && Date.now() - hitEffect.timestamp < 100) {
+	    if (hitEffect.type === 'don') colorDon = '#ff9999';
+	    if (hitEffect.type === 'ka') colorKa = '#ff6666';
+	  }
+
+	  // 外円
+	  ctx.beginPath();
+	  ctx.arc(center, center, outerRadius, 0, Math.PI * 2);
+	  ctx.fillStyle = colorKa;
+	  ctx.fill();
+
+	  // 内円
+	  ctx.beginPath();
+	  ctx.arc(center, center, innerRadius, 0, Math.PI * 2);
+	  ctx.fillStyle = colorDon;
+	  ctx.fill();
+
+	  // --- コントローラー接続状態の表示 ---
+	  const radius = canvasSize * 0.03;
+	  const margin = canvasSize * 0.015;
+
+	  for (let i = 0; i < 4; i++) {
+	    const x = margin + radius;
+	    const y = margin + radius + i * (radius * 2 + margin);
+	    const isConnected = navigator.getGamepads()[i];
+
+	    ctx.beginPath();
+	    ctx.arc(x, y, radius, 0, Math.PI * 2);
+	    ctx.fillStyle = isConnected ? "#4caf50" : "#cccccc";
+	    ctx.fill();
+
+	    ctx.fillStyle = "#ffffff";
+	    ctx.font = `${radius}px sans-serif`;
+	    ctx.textAlign = "center";
+	    ctx.textBaseline = "middle";
+	    ctx.fillText((i + 1).toString(), x, y);
+	  }
+	}
+
+
+    function handleHit(index, type) {
+      if (type === 'don') playSound(soundDon, index);
+      if (type === 'ka') playSound(soundKa, index);
+      hitEffect = { type, timestamp: Date.now() };
+    }
+
+    function updateGamepads() {
+      const connected = navigator.getGamepads();
+      pads.forEach((padData, index) => {
+        const pad = connected[index];
+        if (!pad) return;
+
+        const nowButtons = pad.buttons.map(b => b.pressed);
+        const nowAxes = pad.axes;
+
+        TARGET_BUTTONS.don.forEach(i => {
+          if (nowButtons[i] && !padData.prevButtons[i]) {
+            handleHit(index, 'don');
+          }
+        });
+
+        TARGET_BUTTONS.ka.forEach(i => {
+          if (nowButtons[i] && !padData.prevButtons[i]) {
+            handleHit(index, 'ka');
+          }
+        });
+
+		const prevValue = padData.prevAxis9 || 0;
+		const currValue = nowAxes[AXIS_INDEX] || 0;
+	    if (Math.abs(prevValue - currValue) > AXIS_SENSITIVITY) {
+	      // 軸の値が急激に動いたときに「叩いた」と判定
+	      handleHit(index, 'don');
+	    }
+
+        //padData.prevAxis9 = axisVal;
+		padData.prevAxis9 = currValue;
+        padData.prevButtons = nowButtons;
+      });
+
+      drawTaiko();
+      requestAnimationFrame(updateGamepads);
+    }
+
+    function setupCanvasInput() {
+      canvas.addEventListener("click", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const dx = x - canvasSize / 2;
+        const dy = y - canvasSize / 2;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist <= canvasSize * 0.27) {
+          handleHit(0, 'don');
+        } else if (dist <= canvasSize * 0.42) {
+          handleHit(0, 'ka');
+        }
+      });
+
+      // スマホタッチ対応
+      canvas.addEventListener("touchstart", (e) => {
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const dx = x - canvasSize / 2;
+        const dy = y - canvasSize / 2;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist <= canvasSize * 0.27) {
+          handleHit(0, 'don');
+        } else if (dist <= canvasSize * 0.42) {
+          handleHit(0, 'ka');
+        }
+        e.preventDefault();
+      });
+    }
+
+    window.addEventListener("gamepadconnected", (e) => {
+      pads.set(e.gamepad.index, {
+        prevButtons: e.gamepad.buttons.map(b => b.pressed),
+        prevAxis9: 0
+      });
+      console.log("Gamepad connected:", e.gamepad.id);
+    });
+
+    window.addEventListener("gamepaddisconnected", (e) => {
+      pads.delete(e.gamepad.index);
+      console.log("Gamepad disconnected:", e.gamepad.id);
+    });
+
+    window.addEventListener("click", () => {
+      // ユーザー操作でAudioContext解禁（ブラウザ制限対応）
+      audioCtx.resume();
+    });
+
+    async function init() {
+      soundDon = await loadSound("don.mp3");
+      soundKa = await loadSound("ka.mp3");
+      setupCanvasInput();
+      resizeCanvas();
+      requestAnimationFrame(updateGamepads);
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+    window.addEventListener("orientationchange", () => {
+      // 少し遅延してから再計算（回転が完了するまで wait）
+      setTimeout(resizeCanvas, 200);
+    });
+
+    init();
+  </script>
+</body>
+</html>
