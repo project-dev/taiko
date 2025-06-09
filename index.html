@@ -171,15 +171,15 @@
           }
         });
 
-		const prevValue = padData.prevAxis9 || 0;
-		const currValue = nowAxes[AXIS_INDEX] || 0;
-	    if (Math.abs(prevValue - currValue) > AXIS_SENSITIVITY) {
-	      // 軸の値が急激に動いたときに「叩いた」と判定
-	      handleHit(index, 'don');
-	    }
-
+        const prevValue = padData.prevAxis9 || 0;
+        const currValue = nowAxes[AXIS_INDEX] || 0;
+        if (Math.abs(prevValue - currValue) > AXIS_SENSITIVITY) {
+          // 軸の値が急激に動いたときに「叩いた」と判定
+          handleHit(index, 'don');
+        }
+        
         //padData.prevAxis9 = axisVal;
-		padData.prevAxis9 = currValue;
+		    padData.prevAxis9 = currValue;
         padData.prevButtons = nowButtons;
       });
 
